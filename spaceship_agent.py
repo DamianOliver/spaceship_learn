@@ -5,21 +5,28 @@ import pandas as pd
 import pygame as pg
 
 from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Input, Add
 from tensorflow.keras.optimizers import Adam
 
 from replay_buffer import ReplayBuffer
 
 
-def DeepQNetwork(lr, num_actions, input_dims, fc1, fc2):
-    q_net = Sequential()
-    q_net.add(Dense(fc1, input_dim=input_dims, activation='relu'))
-    q_net.add(Dense(fc2, activation='relu'))
-    q_net.add(Dense(fc2, activation='relu'))
-    q_net.add(Dense(num_actions, activation=None))
-    q_net.compile(optimizer=Adam(learning_rate=lr), loss='mse')
+def DeepQNetwork(lr, num_actions, input_dims):
+    state_input = Input((input_dims,))
 
-    return q_net
+    backbone_1 = Dense(100, activation='relu')(state_input)
+    backbone_2 = Dense(200, activation='relu')(backbone_1)
+    backbone_3 = Dense(100, activation='relu')(backbone_2)
+
+    value_output = Dense(1)(backbone_3)
+    advantage_output = Dense(num_actions)(backbone_3)
+
+    output = Add()([value_output, advantage_output])
+
+    model = tf.keras.Model(state_input, output)
+    model.compile(loss='mse', optimizer=Adam(lr))
+
+    return model
 
 
 class Agent:
@@ -34,8 +41,8 @@ class Agent:
         self.step_counter = 0
         self.tau = 0.001
         self.buffer = ReplayBuffer(batch_size * 10, input_dims)
-        self.q_net = DeepQNetwork(lr, num_actions, input_dims, 256, 256)
-        self.q_target_net = DeepQNetwork(lr, num_actions, input_dims, 256, 256)
+        self.q_net = DeepQNetwork(lr, num_actions, input_dims)
+        self.q_target_net = DeepQNetwork(lr, num_actions, input_dims)
 
     def store_tuple(self, state, action, reward, new_state, done):
         self.buffer.store_tuples(state, action, reward, new_state, done)
@@ -90,7 +97,7 @@ class Agent:
         f = 0
         steps = 0
         txt = open("saved_networks.txt", "w")
-        train = False
+        past_scores = []
 
         for i in range(num_episodes):
             if i % 300 == 0 and i != 0:
@@ -98,7 +105,7 @@ class Agent:
                 f += 1
             done = False
             score = 0.0
-            state, _ = env.reset()
+            state = env.reset()
             while not done:
                 for event in pg.event.get():
                         if event.type == pg.QUIT:
@@ -117,16 +124,19 @@ class Agent:
                 score += reward
                 self.store_tuple(state, action, reward, new_state, done)
                 state = new_state
-                if steps % 10 and train == 0:
+                if steps % 10 == 0:
                     self.train()
                 steps += 1
             # if self.buffer.counter > self.buffer.size - 100:
             #         train = True
-            scores.append(score)
+            if reward > 0:
+                past_scores.append(1)
+            else:
+                past_scores.append(0)
             obj.append(goal)
             episodes.append(i)
-            avg_score = np.mean(scores[-100:])
-            avg_scores.append(avg_score)
+            avg_score = sum(past_scores[-100:])
+            # avg_scores.append(avg_score)
             print("Episode {0}/{1}, Score: {2} ({3}), AVG Score: {4}".format(i, num_episodes, score, self.epsilon,
                                                                              avg_score))
         # if avg_score >= 200.0 and score >= 250:
@@ -136,7 +146,7 @@ class Agent:
                                                                                             score, self.epsilon,
                                                                                             avg_score))
         txt.close()
-        if graph:
+        if graph and False:
             df = pd.DataFrame({'x': episodes, 'Score': scores, 'Average Score': avg_scores, 'Solved Requirement': obj})
 
             plt.plot('x', 'Score', data=df, marker='', color='blue', linewidth=2, label='Score')
@@ -166,15 +176,16 @@ class Agent:
         env.ui.init_render()
         if file_type == 'tf':
             self.q_net = tf.keras.models.load_model(file)
-        elif file_type == 'h5':
-            self.train_model(env, 5, False)
-            self.q_net.load_weights(file)
+        # elif file_type == 'h5':
+        #     self.train_model(env, 5, False)
+        #     self.q_net.load_weights(file)
         self.epsilon = 0.0
+        success_total = 0
         scores, episodes, avg_scores, obj = [], [], [], []
         goal = 200
         score = 0.0
         for i in range(num_episodes):
-            state, _ = env.reset()
+            state = env.reset()
             done = False
             episode_score = 0.0
             while not done:
@@ -184,10 +195,13 @@ class Agent:
                     if event.type == pg.QUIT:
                         pg.quit()
                 action = self.policy(state)
-                new_state, reward, terminated, truncated, _ = env.step(action)
+                new_state, reward, terminated, truncated = env.step(action)
                 done = terminated
                 episode_score += reward
                 state = new_state
+            if reward > 0:
+                success_total += 1
+            print("success rate at {:.2f}".format(success_total / (i + 1)))
             score += episode_score
             scores.append(episode_score)
             obj.append(goal)
@@ -204,6 +218,54 @@ class Agent:
             plt.plot('x', 'Solved Requirement', data=df, marker='', color='red', linewidth=2, linestyle='dashed',
                      label='Solved Requirement')
             plt.legend()
-            plt.savefig('LunarLander_Test.png')
+            plt.savefig('Spaceship_Test.png')
 
-        env.close()
+    def test_all(self, env, num_episodes):
+        env.ui.init_render()
+        self.epsilon = 0
+        file_name = "saved_networks/space_model"
+        scores = []
+        # models = [i for i in range(334)]
+        models = [i for i in range(290, 334)]
+        render = True
+        for i in models:
+            model_score = 0
+            current_file = file_name + str(i)
+            self.load(current_file, 'tf', env)
+            for _ in range(num_episodes):
+                num_steps = 0
+                state = env.reset()
+                done = False
+                while not done:
+                    if render:
+                        env.render()
+                    for event in pg.event.get():
+                        if event.type == pg.QUIT:
+                            pg.quit()
+                        if event.type == pg.KEYDOWN:
+                            if event.key == pg.K_s:
+                                render = not render
+                    action = self.policy(state)
+                    new_state, reward, terminated, truncated, _ = env.step(action)
+                    done = terminated
+                    state = new_state
+                    num_steps += 1
+                    if num_steps > 1000:
+                        reward = -1
+                        done = True
+                if reward > 0:
+                    model_score += 1
+            avg_model_score = model_score / num_episodes * 100
+            scores.append(avg_model_score)
+            print("model {} with score {}".format(i, avg_model_score))
+        
+        df = pd.DataFrame({'x': models, 'Score': scores, 'Solved Requirement': 100})
+
+        plt.plot('x', 'Score', data=df, marker='', color='blue', linewidth=2, label='Score')
+        plt.plot('x', 'Score', data=df, marker='', color='orange', linewidth=2, linestyle='dashed',
+                    label='Score')
+        plt.plot('x', 'Solved Requirement', data=df, marker='', color='red', linewidth=2, linestyle='dashed',
+                    label='Solved Requirement')
+        plt.legend()
+        print("saving:")
+        plt.savefig('Spaceship_Testall.png')            

@@ -1,9 +1,8 @@
 import numpy as np
 
-
 class ReplayBuffer:
     def __init__(self, size, input_shape):
-        self.size = size
+        self.size = 100000
         self.counter = 0
         self.state_buffer = np.zeros((self.size, input_shape), dtype=np.float32)
         self.action_buffer = np.zeros(self.size, dtype=np.int32)

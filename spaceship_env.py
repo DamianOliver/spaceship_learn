@@ -10,12 +10,13 @@ DECELERATION = 0.03
 
 class Env(gym.Env):
     def __init__(self):
-
-        self.action_space = gym.spaces.Discrete(3, start=-1)
+        # just realized this never uses the super(), not a problem I guess?
+        # self.action_space = gym.spaces.Discrete(3, start=-1)
+        self.action_space = [-1, 0, 1]
 
         self.observation_space = gym.spaces.Box(
         low = -100,
-        high = 360,
+        high = 1400,
         shape = (7,),
         dtype = 'uint8'
         )
@@ -40,36 +41,37 @@ class Env(gym.Env):
         done = False
         reward = -0.1
 
-        if action == 0:
-            reward += 0.1
+        # if action == 0:
+        #     reward += 0.1
 
-        if abs(self.spaceship.velocity[0]) < 1 and abs(self.spaceship.velocity[1]) < 1:
-            reward -= 50
+        # if abs(self.spaceship.velocity[0]) < 1 and abs(self.spaceship.velocity[1]) < 1:
+        #     reward -= 50
+        # if abs(self.spaceship.velocity[0]) < 0.5 and abs(self.spaceship.velocity[1]) < 0.5:
+        #     reward -= 500
+        # distance = abs(self.spaceship.pos[0] - self.target.pos[0]) + abs(self.spaceship.pos[1] - self.target.pos[1])
 
-        distance = abs(self.spaceship.pos[0] - self.target.pos[0]) + abs(self.spaceship.pos[1] - self.target.pos[1])
-
-        if distance < first_distance:
-            max_velocity = max(self.spaceship.velocity)
-            if max_velocity > 0.5:
-                reward += 15 * max(self.spaceship.velocity)
-        else:
-            reward -= 100
+        # if distance < first_distance:
+        #     max_velocity = max(self.spaceship.velocity)
+        #     if max_velocity > 0.5:
+        #         reward += 15 * max(self.spaceship.velocity)
+        # else:
+        #     reward -= 100
 
         if self.check_for_collision(self.spaceship, self.target):
             reward += 1000
             done = True
-            print("good job!")
+            # print("good job!")
 
         if self.check_for_out_of_bounds(self.spaceship):
             reward -= 500
             done = True
-            print("BAD. Bad.")
+            # print("BAD. Bad.")
         
         self.update(self.spaceship)
 
         state = self.return_state()
         # print("state:", state)
-        return state, reward, done, None, None
+        return state, reward, done, None
 
     def update(self, object1):
         for i in range(object1.velocity.shape[0]):
@@ -121,11 +123,12 @@ class Env(gym.Env):
         pg.display.update()
 
     def reset(self):
+        print("reset")
         if self.check_for_out_of_bounds(self.spaceship):
             self.spaceship = Spaceship(np.array([100, 100], dtype=float), np.array([0, 0], dtype=float), 0, [25, 50])
         random_pos = [randrange(0, self.screen_dimension[0]), randrange(0, self.screen_dimension[1])]
         self.target = Target(np.array(random_pos), np.array([0, 0]), (30, 30), (200, 30, 30))
-        return self.return_state(), None
+        return self.return_state()
     
 class Body():
     def __init__(self, pos, velocity, size):
@@ -182,7 +185,7 @@ if __name__ == "__main__":
     clock = pg.time.Clock()
 
     while True:
-        clock.tick(100)
+        clock.tick(150)
         action = 0
         for event in pg.event.get():
             if event.type == pg.QUIT:
@@ -218,7 +221,6 @@ if __name__ == "__main__":
             done = False
         env.render()
             
-
 
 
 
