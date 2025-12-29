@@ -4,9 +4,9 @@ import numpy as np
 from random import randrange
 
 BACKGROUND_COLOR = (0, 30, 120)
-ACCELERATION  = 0.03
-DECELERATION = 0.03
-MAX_V = 100
+ACCELERATION  = 0.2
+DECELERATION = 0.04
+MAX_V = 200
 DIRECTIONS = np.array([
     [1, 0, 0, 0],
     [0, 1, 0, 0],
@@ -141,17 +141,25 @@ class Spaceship(Body):
             self.dir_index = (self.dir_index + 1) % 4
         
         if self.dir_index == 0:
-            self.velocity[0] += 2 * ACCELERATION
+            self.velocity[0] += ACCELERATION
         elif self.dir_index == 1:
-            self.velocity[1] -= 2 * ACCELERATION
+            self.velocity[1] -= ACCELERATION
         elif self.dir_index == 2:
-            self.velocity[0] -= 2 * ACCELERATION
+            self.velocity[0] -= ACCELERATION
         elif self.dir_index == 3:
-            self.velocity[1] += 2 * ACCELERATION
+            self.velocity[1] += ACCELERATION
         else:
             print("dir_index not recognized:", self.dir_index)
+            
+        for i in range(len(self.velocity)):
+            if self.velocity[i] > 0:
+                self.velocity[i] = max(0, self.velocity[i] - DECELERATION)
+            else:
+                self.velocity[i] = min(0, self.velocity[i] + DECELERATION)
 
         self.velocity = np.clip(self.velocity, -MAX_V, MAX_V)
+        
+        print(self.velocity)
         
         self.pos += self.velocity
         
@@ -194,16 +202,16 @@ if __name__ == "__main__":
     clock = pg.time.Clock()
 
     while True:
-        clock.tick(150)
-        action = 0
+        clock.tick(30)
+        action = 1
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 pg.quit()
             if event.type == pg.KEYDOWN:
                 if event.key == pg.K_a:
-                    action = 1
+                    action = 2
                 elif event.key == pg.K_d:
-                    action = -1
+                    action = 0
                 elif event.key == pg.K_p:
                     unpause = False
                     while True:
