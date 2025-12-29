@@ -1,101 +1,85 @@
 import pygame as pg
-import gym
+import gymnasium as gym
 import numpy as np
 from random import randrange
 
 BACKGROUND_COLOR = (0, 30, 120)
 ACCELERATION  = 0.03
 DECELERATION = 0.03
+MAX_V = 100
+DIRECTIONS = np.array([
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1]
+])
 
 
-class Env(gym.Env):
-    def __init__(self):
-        # just realized this never uses the super(), not a problem I guess?
-        # self.action_space = gym.spaces.Discrete(3, start=-1)
-        self.action_space = [-1, 0, 1]
+class SpaceshipEnv(gym.Env):
+    '''
+        3 actions are left, no turn, and right
+        Observation space is pos, vel, target_pos
+        '''
+    def __init__(self, headless=True, return_pixels=False):
+        self.headless = headless
+        self.return_pixels = return_pixels
+        self.screen_dimension = (1400, 1000)
+        self.action_space = gym.spaces.Discrete(3)   # 0 is left, 1 is no turn, 2 is right
+        
+        self.step_count = 0
 
-        self.observation_space = gym.spaces.Box(
-        low = -100,
-        high = 1400,
-        shape = (7,),
-        dtype = 'uint8'
-        )
+        self.observation_space = gym.spaces.Dict({
+            "position" : gym.spaces.Box(low=np.array([0, 0]), high=np.array(self.screen_dimension), shape=(2,)),
+            "velocity" : gym.spaces.Box(low=0, high=MAX_V, shape=(2,)),
+            "rotation" : gym.spaces.Box(low=0, high=1, shape=(4,)),
+            "step_count" : gym.spaces.Box(low=0, high=5000, shape=(1,), dtype=float)  # actually not sure what the upper bound on this is
+        })
+        
+        if self.return_pixels:
+            self.observation_space['pixels'] = gym.spaces.Box(low=0, high=255, shape=(self.screen_dimension[0], self.screen_dimension[1], 3), dtype=np.uint8)
 
         self.spaceship = Spaceship(np.array([100, 100], dtype=float), np.array([0, 0], dtype=float), 0, [25, 50])
         self.target = Target(np.array([500, 500]), np.array([0, 0]), (30, 30), (200, 30, 30))
-        self.screen_dimension = (1400, 1000)
         self.ui = Ui(self.screen_dimension)
 
     def return_state(self):
-        return np.array([self.spaceship.pos[0], self.spaceship.pos[1],
-                          self.spaceship.velocity[0], self.spaceship.velocity[1], 
-                          self.spaceship.rotation, self.target.pos[0], self.target.pos[1]])
+        # print("actually returning", DIRECTIONS[self.spaceship.dir_index])
+        state = {
+            "position" : np.array(self.spaceship.pos),
+            "velocity" : np.array(self.spaceship.velocity),
+            "rotation" : DIRECTIONS[self.spaceship.dir_index],
+            "step_count" : self.step_count,
+        }
+        if self.return_pixels:
+            state['pixels'] = self.render()
+        return state
 
     def step(self, action):
-        first_distance = abs(self.spaceship.pos[0] - self.target.pos[0]) + abs(self.spaceship.pos[1] - self.target.pos[1])
-        self.spaceship.rotation += 90 * action
-        self.spaceship.rotation %= 360
-
-        self.spaceship.pos += self.spaceship.velocity
+        self.spaceship.update(action)
+        # print("updated?", self.spaceship.dir_index)
 
         done = False
-        reward = -0.1
-
-        # if action == 0:
-        #     reward += 0.1
-
-        # if abs(self.spaceship.velocity[0]) < 1 and abs(self.spaceship.velocity[1]) < 1:
-        #     reward -= 50
-        # if abs(self.spaceship.velocity[0]) < 0.5 and abs(self.spaceship.velocity[1]) < 0.5:
-        #     reward -= 500
-        # distance = abs(self.spaceship.pos[0] - self.target.pos[0]) + abs(self.spaceship.pos[1] - self.target.pos[1])
-
-        # if distance < first_distance:
-        #     max_velocity = max(self.spaceship.velocity)
-        #     if max_velocity > 0.5:
-        #         reward += 15 * max(self.spaceship.velocity)
-        # else:
-        #     reward -= 100
+        reward = -0.02
 
         if self.check_for_collision(self.spaceship, self.target):
-            reward += 1000
+            reward += 1
             done = True
             # print("good job!")
 
         if self.check_for_out_of_bounds(self.spaceship):
-            reward -= 500
+            reward -= 0.5
             done = True
-            # print("BAD. Bad.")
         
-        self.update(self.spaceship)
+        self.step_count += 1
 
         state = self.return_state()
-        # print("state:", state)
-        return state, reward, done, None
-
-    def update(self, object1):
-        for i in range(object1.velocity.shape[0]):
-            if object1.velocity[i] > 0:
-                object1.velocity[i] = min(max(0, object1.velocity[i] - DECELERATION), 100)
-            else:
-                object1.velocity[i] = max(min(0, object1.velocity[i] + DECELERATION), -100)
-        if object1.rotation == 0:
-            object1.velocity[0] += 2 * ACCELERATION
-        elif object1.rotation / 90 == 1:
-            object1.velocity[1] -= 2 * ACCELERATION
-        elif object1.rotation / 90 == 2:
-            object1.velocity[0] -= 2 * ACCELERATION
-        elif object1.rotation / 90 == 3:
-            object1.velocity[1] += 2 * ACCELERATION
+        return state, reward, done, False, None
 
     def check_for_collision(self, object1, object2):
-        if object1.rotation == 0 or object1.rotation == 180:
+        if object1.dir_index == 0 or object1.dir_index == 2:
             sizes = [object1.size[1], object1.size[0]]
         else:
             sizes = [object1.size[0], object1.size[1]]
-        # print(object1.pos[0] - object2.pos[0], width + object2.size[0])
-        # print(object1.pos[1] - object2.pos[1], height + object2.size[1])
-        # print()
 
         dists = [object1.pos[0] - object2.pos[0], object1.pos[1] - object2.pos[1]]
         for i, dist in enumerate(dists):
@@ -118,17 +102,19 @@ class Env(gym.Env):
             return True
         return False
     
-    def render(self):
+    def render(self, render_mode="rgb_array"):
         self.ui.draw(self.spaceship, self.target)
-        pg.display.update()
+        if not self.headless:
+            pg.display.update()
+        return pg.surfarray.array3d(self.ui.screen)
 
-    def reset(self):
-        print("reset")
+    def reset(self, seed=None, options=None):
         if self.check_for_out_of_bounds(self.spaceship):
             self.spaceship = Spaceship(np.array([100, 100], dtype=float), np.array([0, 0], dtype=float), 0, [25, 50])
         random_pos = [randrange(0, self.screen_dimension[0]), randrange(0, self.screen_dimension[1])]
         self.target = Target(np.array(random_pos), np.array([0, 0]), (30, 30), (200, 30, 30))
-        return self.return_state()
+        self.step_count = 0
+        return self.return_state(), {}
     
 class Body():
     def __init__(self, pos, velocity, size):
@@ -144,12 +130,34 @@ class Body():
 class Spaceship(Body):
     def __init__(self, pos, velocity, rotation, size):
         super().__init__(pos, velocity, size)
-        self.rotation = rotation
+        self.dir_index = rotation
         self.image = pg.image.load("Images/spaceship_image.png")
         self.image = pg.transform.scale(self.image, size)
+        
+    def update(self, action):
+        if action == 0:
+            self.dir_index = (self.dir_index - 1) % 4
+        elif action == 2:
+            self.dir_index = (self.dir_index + 1) % 4
+        
+        if self.dir_index == 0:
+            self.velocity[0] += 2 * ACCELERATION
+        elif self.dir_index == 1:
+            self.velocity[1] -= 2 * ACCELERATION
+        elif self.dir_index == 2:
+            self.velocity[0] -= 2 * ACCELERATION
+        elif self.dir_index == 3:
+            self.velocity[1] += 2 * ACCELERATION
+        else:
+            print("dir_index not recognized:", self.dir_index)
 
+        self.velocity = np.clip(self.velocity, -MAX_V, MAX_V)
+        
+        self.pos += self.velocity
+        
+        
     def draw(self, screen):
-        image = pg.transform.rotate(self.image, self.rotation - 90)
+        image = pg.transform.rotate(self.image, (self.dir_index - 1) * 90)
         screen.blit(image, self.pos)
 
 class Target(Body):
@@ -163,7 +171,8 @@ class Target(Body):
 class Ui():
     def __init__(self, screen_dimension):
         self.screen_dimension = screen_dimension
-        self.screen = None
+        self.screen: pg.surface = None
+        self.init_render()
 
     def init_render(self):
         self.screen = pg.display.set_mode((self.screen_dimension), pg.RESIZABLE)
@@ -177,7 +186,7 @@ class Ui():
     
 if __name__ == "__main__":
 
-    env = Env()
+    env = SpaceshipEnv(headless=False)
 
     env.ui.init_render()
     env.render()

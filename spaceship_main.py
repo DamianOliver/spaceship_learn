@@ -2,7 +2,7 @@ from spaceship_agent import Agent
 from spaceship_peragent import PERAgent
 import gym
 import tensorflow as tf
-from spaceship_env import Env
+from spaceship_env import SpaceshipEnv
 
 
 # gpus = tf.config.list_physical_devices('GPU')
@@ -13,7 +13,7 @@ from spaceship_env import Env
 # import re
 # cProfile.run('re.compile("foo|bar")', 'restats')
 
-env = Env()
+env = SpaceshipEnv()
 # env = gym.make("LunarLander-v2")
 spec = gym.spec("LunarLander-v2")
 train = 0
