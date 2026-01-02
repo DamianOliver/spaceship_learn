@@ -3,6 +3,8 @@ import gymnasium as gym
 import numpy as np
 from random import randrange
 
+pg.init()
+
 BACKGROUND_COLOR = (0, 30, 120)
 ACCELERATION  = 0.2
 DECELERATION = 0.04
@@ -13,7 +15,18 @@ DIRECTIONS = np.array([
     [0, 0, 1, 0],
     [0, 0, 0, 1]
 ])
+ANNOTATION_FONT = pg.font.SysFont("Arial", 20)
 
+
+def draw_text_bottom_right(surface, text, font, color=(255, 255, 255), padding=(10, 10)):
+    text_surf = font.render(text, True, color)
+    text_rect = text_surf.get_rect(
+        bottomright=(
+            surface.get_width() - padding[0],
+            surface.get_height() - padding[1],
+        )
+    )
+    surface.blit(text_surf, text_rect)
 
 class SpaceshipEnv(gym.Env):
     '''
@@ -30,9 +43,10 @@ class SpaceshipEnv(gym.Env):
 
         self.observation_space = gym.spaces.Dict({
             "position" : gym.spaces.Box(low=np.array([0, 0]), high=np.array(self.screen_dimension), shape=(2,)),
+            "target" : gym.spaces.Box(low=np.array([0, 0]), high=np.array(self.screen_dimension), shape=(2,)),
             "velocity" : gym.spaces.Box(low=0, high=MAX_V, shape=(2,)),
             "rotation" : gym.spaces.Box(low=0, high=1, shape=(4,)),
-            "step_count" : gym.spaces.Box(low=0, high=5000, shape=(1,), dtype=float)  # actually not sure what the upper bound on this is
+            "step_count" : gym.spaces.Box(low=0, high=5000, shape=(1,), dtype=float),  # actually not sure what the upper bound on this is
         })
         
         if self.return_pixels:
@@ -41,11 +55,13 @@ class SpaceshipEnv(gym.Env):
         self.spaceship = Spaceship(np.array([100, 100], dtype=float), np.array([0, 0], dtype=float), 0, [25, 50])
         self.target = Target(np.array([500, 500]), np.array([0, 0]), (30, 30), (200, 30, 30))
         self.ui = Ui(self.screen_dimension)
+        self.last_action = None
 
     def return_state(self):
         # print("actually returning", DIRECTIONS[self.spaceship.dir_index])
         state = {
             "position" : np.array(self.spaceship.pos),
+            "target" : np.array(self.target.pos),
             "velocity" : np.array(self.spaceship.velocity),
             "rotation" : DIRECTIONS[self.spaceship.dir_index],
             "step_count" : self.step_count,
@@ -55,20 +71,31 @@ class SpaceshipEnv(gym.Env):
         return state
 
     def step(self, action):
+        self.last_action = action
         self.spaceship.update(action)
         # print("updated?", self.spaceship.dir_index)
 
         done = False
-        reward = -0.02
+        reward = -0.02  # temperary bonus for survival to see if this thing can train at all
 
         if self.check_for_collision(self.spaceship, self.target):
-            reward += 1
-            done = True
+            reward += 2.0
+            self.reset()  # resets target, not spaceship
+            # done = True  # don't end when target is reached, just try to reach another target
             # print("good job!")
 
         if self.check_for_out_of_bounds(self.spaceship):
-            reward -= 0.5
+            reward -= 1.0
             done = True
+            
+        # shaped reward with similarity between velocity vector and displacement vector to target
+        displacement = (self.target.pos - self.spaceship.pos)
+        norm_delta_x = np.linalg.norm(displacement)
+        if norm_delta_x == 0:
+            similarity = 0.0
+        else:
+            similarity = np.dot(self.spaceship.velocity, displacement) / norm_delta_x
+        reward += similarity * 0.2
         
         self.step_count += 1
 
@@ -103,7 +130,7 @@ class SpaceshipEnv(gym.Env):
         return False
     
     def render(self, render_mode="rgb_array"):
-        self.ui.draw(self.spaceship, self.target)
+        self.ui.draw(self.spaceship, self.target, self.last_action)
         if not self.headless:
             pg.display.update()
         return pg.surfarray.array3d(self.ui.screen)
@@ -133,12 +160,19 @@ class Spaceship(Body):
         self.dir_index = rotation
         self.image = pg.image.load("Images/spaceship_image.png")
         self.image = pg.transform.scale(self.image, size)
+        self.turn_time = 10 # number of steps between turns
+        self.time_since_turn = self.turn_time
         
     def update(self, action):
-        if action == 0:
-            self.dir_index = (self.dir_index - 1) % 4
-        elif action == 2:
-            self.dir_index = (self.dir_index + 1) % 4
+        if self.time_since_turn == self.turn_time:
+            if action == 0:
+                self.dir_index = (self.dir_index - 1) % 4
+                self.time_since_turn = -1
+            elif action == 2:
+                self.dir_index = (self.dir_index + 1) % 4
+                self.time_since_turn = -1
+            
+        self.time_since_turn = min(self.time_since_turn + 1, self.turn_time)
         
         if self.dir_index == 0:
             self.velocity[0] += ACCELERATION
@@ -158,9 +192,7 @@ class Spaceship(Body):
                 self.velocity[i] = min(0, self.velocity[i] + DECELERATION)
 
         self.velocity = np.clip(self.velocity, -MAX_V, MAX_V)
-        
-        print(self.velocity)
-        
+                
         self.pos += self.velocity
         
         
@@ -186,10 +218,12 @@ class Ui():
         self.screen = pg.display.set_mode((self.screen_dimension), pg.RESIZABLE)
         self.screen.fill(BACKGROUND_COLOR)
 
-    def draw(self, spaceship, target):
+    def draw(self, spaceship, target, last_action=None):
         self.screen.fill(BACKGROUND_COLOR)
         spaceship.draw(self.screen)
         target.draw(self.screen)
+        # if not last_action is None:
+        #     draw_text_bottom_right(self.screen, f"Action: {last_action}", ANNOTATION_FONT)
 
     
 if __name__ == "__main__":
